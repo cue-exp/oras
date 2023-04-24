@@ -18,6 +18,8 @@ package oras
 #repoManifest: {
 	_oras: "manifest"
 	repo!: string
-	manifest!: #manifest
+	manifest!: #manifest & {
+		schemaVersion: _
+	}
 	desc?: #descriptor
 }

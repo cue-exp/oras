@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -21,6 +21,11 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/tools/txtar"
 	"oras.land/oras-go/v2/registry/remote"
+)
+
+const (
+	debug          = true
+	singleThreaded = false
 )
 
 const orasPkg = "github.com/cue-exp/oras"
@@ -76,9 +81,7 @@ func runApply(pkg string) error {
 		registry: registry,
 	}
 
-	ctl := flow.New(&flow.Config{
-		FindHiddenTasks: true,
-	}, v, a.getTask)
+	ctl := flow.New(nil, v, a.getTask)
 	if err := ctl.Run(ctx); err != nil {
 		return fmt.Errorf("error running flow: %v", err)
 	}
@@ -88,6 +91,12 @@ func runApply(pkg string) error {
 type applier struct {
 	cueCtx   *cue.Context
 	registry *remote.Registry
+}
+
+func logf(f string, a ...any) {
+	if debug {
+		fmt.Println(fmt.Sprintf(f, a...))
+	}
 }
 
 func (a *applier) getTask(v cue.Value) (flow.Runner, error) {
@@ -101,11 +110,11 @@ func (a *applier) getTask(v cue.Value) (flow.Runner, error) {
 	}
 	switch s {
 	case "blob":
-		return flow.RunnerFunc(a.pushBlob), nil
+		return flow.RunnerFunc(mutex(a.pushBlob)), nil
 	case "tag":
-		return flow.RunnerFunc(a.pushTag), nil
+		return flow.RunnerFunc(mutex(a.pushTag)), nil
 	case "manifest":
-		return flow.RunnerFunc(a.pushManifest), nil
+		return flow.RunnerFunc(mutex(a.pushManifest)), nil
 	default:
 		return nil, fmt.Errorf("unknown _oras field value %q", s)
 	}
@@ -115,6 +124,21 @@ type blobPush struct {
 	Desc   ocispec.Descriptor `json:"desc"`
 	Repo   string             `json:"repo,omitempty"`
 	Source any                `json:"source"`
+}
+
+var globalMutex sync.Mutex
+
+func mutex(f flow.RunnerFunc) flow.RunnerFunc {
+	if !singleThreaded {
+		return f
+	}
+	return func(t *flow.Task) error {
+		globalMutex.Lock()
+		logf("-- run %v {", t.Path())
+		defer logf("}")
+		defer globalMutex.Unlock()
+		return f(t)
+	}
 }
 
 func (a *applier) pushBlob(t *flow.Task) error {
@@ -127,6 +151,7 @@ func (a *applier) pushBlob(t *flow.Task) error {
 	if err != nil {
 		return fmt.Errorf("cannot make repository from %q: %v", p.Repo, err)
 	}
+	var sourcePrint string
 	var sourceData []byte
 	switch mtype := p.Desc.MediaType; {
 	case strings.HasSuffix(mtype, "json"): // TODO better
@@ -135,12 +160,15 @@ func (a *applier) pushBlob(t *flow.Task) error {
 			return fmt.Errorf("cannot marshal JSON: %v", err)
 		}
 		sourceData = data
+		datai, _ := json.MarshalIndent(p.Source, "\t", "\t")
+		sourcePrint = string(datai)
 	case mtype == "text/plain":
 		s, ok := p.Source.(string)
 		if !ok {
 			return fmt.Errorf("invalid source %#v for text/plain media type", p.Source)
 		}
 		sourceData = []byte(s)
+		sourcePrint = fmt.Sprintf("%q", s)
 	case mtype == "application/zip":
 		s, ok := p.Source.(string)
 		if !ok {
@@ -151,10 +179,11 @@ func (a *applier) pushBlob(t *flow.Task) error {
 			return fmt.Errorf("cannot make zip: %v", err)
 		}
 		sourceData = data
+		sourcePrint = "`\n" + s + "`"
 	}
 	p.Desc.Digest = digest.FromBytes(sourceData)
 	p.Desc.Size = int64(len(sourceData))
-	log.Printf("pushing blob to %s; digest %s", p.Repo, p.Desc.Digest)
+	logf("%v: push %s to %s -> %s\n\tsource: %s", t.Path(), p.Desc.MediaType, p.Repo, p.Desc.Digest, sourcePrint)
 	if err := repo.Push(ctx, p.Desc, bytes.NewReader(sourceData)); err != nil {
 		return fmt.Errorf("error pushing blob to repo %q: %v", p.Repo, err)
 	}
@@ -182,7 +211,7 @@ func (a *applier) pushTag(t *flow.Task) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve digest %q: %v", p.Digest, err)
 	}
-	log.Printf("pushing tag %s:%s", p.Repo, p.Name)
+	logf("%v: push tag %s:%s", t.Path(), p.Repo, p.Name)
 	if err := repo.Tag(ctx, descriptor, p.Name); err != nil {
 		return fmt.Errorf("cannot create tag %q: %v", p.Name, err)
 	}
@@ -212,7 +241,12 @@ func (a *applier) pushManifest(t *flow.Task) error {
 	p.Desc.Size = int64(len(p.Manifest))
 
 	// Ensure that the generated manifest is valid
-	log.Printf("pushing manifest to %s; digest %s", p.Repo, p.Desc.Digest)
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%v: push manifest to %s -> %s\n", t.Path(), p.Repo, p.Desc.Digest)
+
+	fmt.Fprintf(&buf, "\tsource: ")
+	json.Indent(&buf, p.Manifest, "\t", "\t")
+	logf("%s", buf.String())
 	if err := manifestRepo.Push(ctx, p.Desc, bytes.NewReader(p.Manifest)); err != nil {
 		return fmt.Errorf("error pushing manifest to repo %q: %v", p.Repo, err)
 	}
