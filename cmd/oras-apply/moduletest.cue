@@ -6,33 +6,47 @@ import (
 )
 
 #module: {
+	// path holds the module path.
+	// TODO make this include the major version too.
 	path!: string
+
+	// pathVer holds the fully qualified module path including its minor version.
 	pathVer!: string
+
+	// version holds the version of the module.
 	version!: string
-	files!: string	// txtar content
+
+	// files holds all the files in the module, in txtar format.
+	files!: string
+
+	// deps holds all the modules that this module depends on.
 	deps?: [... #module]
 
-	repo?: {
+	// repoActions is filled out automatically from the above fields
+	// by the modules template.
+	repoActions?: {
 		layers!: [... oras.#repoBlob]
 		config!: oras.#repoBlob & {
 			source: #moduleConfig
 		}
 		manifest!: oras.#repoManifest
-		tag!: oras.#repoTag
+		tag!:      oras.#repoTag
 	}
 }
 
 #modules: [#modver]: #module
 
-#modver: =~ "^[^@]+@[^@]+$"
+#modver: =~"^[^@]+@[^@]+$"
 
+// #moduleConfig defines the configuration blob uploaded
+// as part of a module.
 #moduleConfig: {
 	resolvedModules: [#modver]: {
 		digest!: #digest
 	}
 }
 
-#digest: =~ "^sha256:.*"
+#digest: =~"^sha256:.*"
 
 modules: #modules
 
@@ -42,49 +56,51 @@ modules: [modNameVer=_]: {
 	let _path = _parts[0]
 	let _version = _parts[1]
 	path: _path
-	repo: tag: {
-		name: _version
+	repoActions: tag: {
+		name:   _version
 		"repo": path
-		digest: repo.manifest.desc.digest
+		digest: repoActions.manifest.desc.digest
 	}
-	deps!: _
+	deps!:  _
 	files!: _
-	repo: layers: [
-		// The first blob is always the "self" module content.
-		{
+	repoActions: {
+		layers: [
+			// The first blob is always the "self" module content.
+			{
+				repo: path
+				desc: mediaType: "application/zip"
+				source: files
+			},
+			for dep in deps {
+				repo: path
+				let depSelf = dep.repoActions.layers[0]
+				desc:   depSelf.desc
+				source: depSelf.source
+			},
+		]
+		config: {
 			repo: path
-			desc: mediaType: "application/zip"
-			source: files
-		},
-		for dep in deps {
-			repo: path
-			let depSelf = dep.repo.layers[0]
-			desc: depSelf.desc
-			source: depSelf.source
-		}
-	]
-	repo: config: {
-		repo: path
-		desc: mediaType: "application/json"		// TODO custom module config json type
-		source: {
-			resolvedModules: {
-				for dep in deps {
-					(dep.pathVer): {
-						digest: dep.repo.layers[0].desc.digest
+			desc: mediaType: "application/json" // TODO custom module config json type
+			source: {
+				resolvedModules: {
+					for dep in deps {
+						(dep.pathVer): {
+							digest: dep.repoActions.layers[0].desc.digest
+						}
 					}
 				}
 			}
 		}
-	}
-	repo: manifest: {
-		"repo": path
 		manifest: {
-			config: repo.config.desc
-			layers: [
-				for layer in repo.layers {
-					layer.desc
-				}
-			]
+			repo: path
+			manifest: {
+				config: repoActions.config.desc
+				layers: [
+					for layer in repoActions.layers {
+						layer.desc
+					},
+				]
+			}
 		}
 	}
 }
