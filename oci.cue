@@ -111,7 +111,7 @@ package oras
 
 	if mediaType == "application/vnd.oci.image.manifest.v1+json" {
 		// TODO https://github.com/opencontainers/image-spec/blob/v1.0.1/image-index.md#image-index-property-descriptions
-		platform!: _
+		// platform!: _
 	}
 
 	// data contains an embedded representation of the referenced content.

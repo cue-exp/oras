@@ -77,11 +77,6 @@ modules: [modNameVer=_]: {
 
 	pathVer: modNameVer
 	path: _path
-	repoActions: tag: {
-		name:   _version
-		"repo": _repoName
-		digest: repoActions.manifest.desc.digest
-	}
 	deps!:       _
 	moduleFile!: _
 
@@ -89,6 +84,11 @@ modules: [modNameVer=_]: {
 	files: "cue.mod/module.cue": json.Marshal(moduleFile)
 
 	repoActions: {
+		tag: {
+			name:   _version
+			"repo": _repoName
+			desc: repoActions.manifest.desc
+		}
 		// Each dependency is represented as a layer.
 		// We know which layer is which because the
 		// config blob holds that metadata.

@@ -189,7 +189,12 @@ func fetchJSON(ctx context.Context, from content.Fetcher, desc ocispec.Descripto
 }
 
 func isManifest(mediaType string) bool {
-	return mediaType == "application/vnd.oci.image.manifest.v1+json"
+	switch mediaType {
+	case ocispec.MediaTypeImageManifest,
+		ocispec.MediaTypeArtifactManifest:
+		return true
+	}
+	return false
 }
 
 // isJSON reports whether the given media type has JSON as an underlying encoding.

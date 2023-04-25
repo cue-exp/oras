@@ -11,8 +11,8 @@ package oras
 	_oras: "tag"
 	repo!: string
 	name!: string
-	// Must be digest of a manifest.
-	digest!: string
+	// desc must describe a manifest.
+	desc!: #descriptor
 }
 
 #repoManifest: {
