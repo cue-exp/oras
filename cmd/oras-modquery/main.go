@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/module"
@@ -21,6 +22,10 @@ usage: oras-modquery [cmd [arg...]]
 Sub-commands:
 
 	modfile $module@$version
+	list $module
+	latest $module
+	vendor $module
+	deps $module@$version
 `)
 		os.Exit(2)
 	}
@@ -47,6 +52,12 @@ func runCommand(cmd string, args []string) error {
 	switch cmd {
 	case "modfile":
 		return showModFile(ctx, client, args)
+	case "list":
+		return listVersions(ctx, client, args)
+	case "deps":
+		return showDeps(ctx, client, args)
+	case "latest":
+		return latestVersion(ctx, client, args)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
@@ -70,6 +81,98 @@ func showModFile(ctx context.Context, client *registryclient.Client, args []stri
 		return fmt.Errorf("cannot get module file: %v", err)
 	}
 	os.Stdout.Write(data)
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		fmt.Println()
+	}
+	return nil
+}
+
+func showDeps(ctx context.Context, client *registryclient.Client, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: deps $module@$version")
+	}
+	mod := args[0]
+	mv, ok := splitPathVersion(mod)
+	if !ok {
+		return fmt.Errorf("invalid module path@version %q", mod)
+	}
+	m, err := client.GetModule(ctx, mv)
+	if err != nil {
+		return err
+	}
+	deps, err := m.Dependencies(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot access dependencies: %v", err)
+	}
+	depStrs := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		depStrs = append(depStrs, dep.Version().String())
+	}
+	sort.Strings(depStrs)
+	for _, s := range depStrs {
+		fmt.Println(s)
+	}
+	return nil
+}
+
+func listVersions(ctx context.Context, client *registryclient.Client, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: list $module")
+	}
+	mod := args[0]
+	if strings.Contains(mod, "@") {
+		return fmt.Errorf("list does not take an @$version suffix")
+	}
+	versions, err := client.ModuleVersions(ctx, mod)
+	if err != nil {
+		return err
+	}
+	sort.Sort(semver.ByVersion(versions))
+	for _, v := range versions {
+		fmt.Println(v)
+	}
+	return nil
+}
+
+func latestVersion(ctx context.Context, client *registryclient.Client, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: latest $module")
+	}
+	mod := args[0]
+	if strings.Contains(mod, "@") {
+		return fmt.Errorf("list does not take an @$version suffix")
+	}
+	versions, err := client.ModuleVersions(ctx, mod)
+	if err != nil {
+		return err
+	}
+	maxPre := ""
+	maxStable := ""
+	for _, v := range versions {
+		pre := semver.Prerelease(v)
+		if pre == "" {
+			if maxStable == "" || semver.Compare(v, maxStable) > 0 {
+				maxStable = v
+			}
+		} else {
+			if maxPre == "" || semver.Compare(v, maxPre) > 0 {
+				maxPre = v
+			}
+		}
+	}
+	if maxStable == "" && maxPre == "" {
+		// TODO log this, as it means that some of the versions aren't valid?
+		return fmt.Errorf("no versions found for %q", mod)
+	}
+	result := maxStable
+	if result == "" {
+		// No stable versions; fall back to using the latest prerelease version.
+		result = maxPre
+	}
+	if maxStable != "" {
+		result = maxStable
+	}
+	fmt.Println(result)
 	return nil
 }
 
@@ -102,6 +205,3 @@ func vendor(mod string) error {
 	// 	writedir(modname, blob)
 	// }
 }
-
-// TODO get module list
-// TODO get module latest
