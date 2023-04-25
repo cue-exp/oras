@@ -5,14 +5,14 @@ modules: "example.com@v0.0.1": {
 		modules["foo.com/bar/hello@v0.2.3"],
 		modules["bar.com@v0.5.0"],
 	]
-	files: """
-		-- cue.mod/module.cue --
+	moduleFile: {
 		module: "example.com"
 		deps: {
 			"foo.com/bar/hello": v: "v0.2.3",
 			"bar.com": v: "v0.5.0",
 		}
-		-- top.cue --
+	}
+	files: "top.cue": """
 		package main
 
 		import a "foo.com/bar/hello"
@@ -26,14 +26,14 @@ modules: "foo.com/bar/hello@v0.2.3": {
 		modules["bar.com@v0.0.2"],
 		modules["baz.org@v0.10.1"],
 	]
-	files: """
-		-- cue.mod/module.cue --
+	moduleFile: {
 		module: "foo.com/bar/hello"
 		deps: {
 			"bar.com": v: "v0.0.2"
 			"baz.org": v: "v0.10.1"
 		}
-		-- x.cue --
+	}
+	files: "x.cue": """
 		package hello
 		import (
 			a "bar.com/bar"
@@ -48,11 +48,11 @@ modules: "bar.com@v0.0.2": {
 	deps: [
 		modules["baz.org@v0.0.2"],
 	]
-	files: """
-		-- cue.mod/module.cue --
+	moduleFile: {
 		module: "bar.com"
 		deps: "baz.org": v: "v0.0.2"
-		-- x.cue --
+	}
+	files: "x.cue": """
 		package bar
 		import a "baz.org:baz"
 		"bar.com": "v0.0.2"
@@ -63,11 +63,11 @@ modules: "bar.com@v0.5.0": {
 	deps: [
 		modules["baz.org@v0.5.0"],
 	]
-	files: """
-		-- cue.mod/module.cue --
+	moduleFile: {
 		module: "bar.com"
 		deps: "baz.org": v: "v0.5.0"
-		-- x.cue --
+	}
+	files: "x.cue": """
 		package bar
 		import a "baz.org:baz"
 		"bar.com": "v0.0.2"
@@ -76,40 +76,32 @@ modules: "bar.com@v0.5.0": {
 }
 modules: "baz.org@v0.0.2": {
 	deps: []
-	files: """
-		-- cue.mod/module.cue --
-		module: "baz.org"
-		-- baz.cue --
+	moduleFile: module: "baz.org"
+	files: "baz.cue": """
 		package baz
 		"baz.org": "v0.0.2"
 		"""
 }
 modules: "baz.org@v0.1.2": {
 	deps: []
-	files: """
-		-- cue.mod/module.cue --
-		module: "baz.org"
-		-- x.cue --
+	moduleFile: module: "baz.org"
+	files: "x.cue": """
 		package baz
 		"baz.org": "v0.1.2"
 		"""
 }
 modules: "baz.org@v0.5.0": {
 	deps: []
-	files: """
-		-- cue.mod/module.cue --
-		module: "baz.org"
-		-- baz.cue --
+	moduleFile: module: "baz.org"
+	files: "baz.cue": """
 		package baz
 		"baz.org": "v0.5.0"
 		"""
 }
 modules: "baz.org@v0.10.1": {
 	deps: []
-	files: """
-		-- cue.mod/module.cue --
-		module: "baz.org"
-		-- baz.cue --
+	moduleFile: module: "baz.org"
+	files: "baz.cue": """
 		package baz
 		"baz.org": "v0.10.1"
 		"""

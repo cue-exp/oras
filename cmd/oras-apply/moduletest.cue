@@ -1,6 +1,7 @@
 package test
 
 import (
+	"encoding/json"
 	"strings"
 	"github.com/cue-exp/oras"
 )
@@ -16,8 +17,11 @@ import (
 	// version holds the version of the module.
 	version!: string
 
+	// moduleFile holds the contents of cue.mod/module.cue
+	moduleFile!: _#ModuleFile
+
 	// files holds all the files in the module, in txtar format.
-	files!: string
+	files!: [string]: string
 
 	// deps holds all the modules that this module depends on.
 	deps?: [... #module]
@@ -44,6 +48,7 @@ import (
 	resolvedModules: [#modver]: {
 		digest!: #digest
 	}
+	moduleFile!: _#ModuleFile
 }
 
 #digest: =~"^sha256:.*"
@@ -62,7 +67,8 @@ modules: [modNameVer=_]: {
 		digest: repoActions.manifest.desc.digest
 	}
 	deps!:  _
-	files!: _
+	moduleFile!: _
+	files: "cue.mod/module.cue": json.Marshal(moduleFile)
 	repoActions: {
 		layers: [
 			// The first blob is always the "self" module content.
@@ -71,6 +77,9 @@ modules: [modNameVer=_]: {
 				desc: mediaType: "application/zip"
 				source: files
 			},
+			// Each dependency is represented as a layer.
+			// We know which layer is which because the
+			// config blob holds that metadata.
 			for dep in deps {
 				repo: path
 				let depSelf = dep.repoActions.layers[0]
@@ -89,6 +98,7 @@ modules: [modNameVer=_]: {
 						}
 					}
 				}
+				"moduleFile": moduleFile
 			}
 		}
 		manifest: {

@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -19,7 +19,6 @@ import (
 	"cuelang.org/go/tools/flow"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"golang.org/x/tools/txtar"
 	"oras.land/oras-go/v2/registry/remote"
 )
 
@@ -123,7 +122,7 @@ func (a *applier) getTask(v cue.Value) (flow.Runner, error) {
 type blobPush struct {
 	Desc   ocispec.Descriptor `json:"desc"`
 	Repo   string             `json:"repo,omitempty"`
-	Source any                `json:"source"`
+	Source json.RawMessage    `json:"source"`
 }
 
 var globalMutex sync.Mutex
@@ -151,43 +150,35 @@ func (a *applier) pushBlob(t *flow.Task) error {
 	if err != nil {
 		return fmt.Errorf("cannot make repository from %q: %v", p.Repo, err)
 	}
-	var sourcePrint string
 	var sourceData []byte
 	switch mtype := p.Desc.MediaType; {
-	case strings.HasSuffix(mtype, "json"): // TODO better
-		data, err := json.Marshal(p.Source)
-		if err != nil {
-			return fmt.Errorf("cannot marshal JSON: %v", err)
-		}
-		sourceData = data
-		datai, _ := json.MarshalIndent(p.Source, "\t", "\t")
-		sourcePrint = string(datai)
+	case strings.HasSuffix(mtype, "+json") || strings.HasSuffix(mtype, "/json"):
+		sourceData = p.Source
 	case mtype == "text/plain":
-		s, ok := p.Source.(string)
-		if !ok {
+		var s string
+		if err := json.Unmarshal(p.Source, &s); err != nil {
 			return fmt.Errorf("invalid source %#v for text/plain media type", p.Source)
 		}
 		sourceData = []byte(s)
-		sourcePrint = fmt.Sprintf("%q", s)
 	case mtype == "application/zip":
-		s, ok := p.Source.(string)
-		if !ok {
+		var files map[string]string
+		if err := json.Unmarshal(p.Source, &files); err != nil {
 			return fmt.Errorf("invalid source %#v for application/zip media type", p.Source)
 		}
-		data, err := getZip(s)
+		data, err := getZip(files)
 		if err != nil {
 			return fmt.Errorf("cannot make zip: %v", err)
 		}
 		sourceData = data
-		sourcePrint = "`\n" + s + "`"
 	}
 	p.Desc.Digest = digest.FromBytes(sourceData)
 	p.Desc.Size = int64(len(sourceData))
-	logf("%v: push %s to %s -> %s\n\tsource: %s", t.Path(), p.Desc.MediaType, p.Repo, p.Desc.Digest, sourcePrint)
+	prettySource, _ := json.MarshalIndent(p.Source, "\t", "\t")
+	logf("%v: push %s to %s -> %s\n\tsource: %s", t.Path(), p.Desc.MediaType, p.Repo, p.Desc.Digest, prettySource)
 	if err := repo.Push(ctx, p.Desc, bytes.NewReader(sourceData)); err != nil {
 		return fmt.Errorf("error pushing blob to repo %q: %v", p.Repo, err)
 	}
-	fillTaskPath(t, cue.MakePath(cue.Str("desc"), cue.Str("digest")), p.Desc.Digest)
+	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc"), cue.Str("digest")), p.Desc.Digest))
 	return nil
 }
 
@@ -250,48 +241,35 @@ func (a *applier) pushManifest(t *flow.Task) error {
 	if err := manifestRepo.Push(ctx, p.Desc, bytes.NewReader(p.Manifest)); err != nil {
 		return fmt.Errorf("error pushing manifest to repo %q: %v", p.Repo, err)
 	}
-	fillTaskPath(t, cue.MakePath(cue.Str("desc")), p.Desc)
+	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc")), p.Desc))
 	return nil
 }
 
-func fillTaskPath(t *flow.Task, path cue.Path, v any) {
-	top := t.Value().Context().CompileString(`_`)
-	t.Fill(top.FillPath(path, v))
-}
-
 // getZip returns a zip archive consisting of all the files in ar
-func getZip(s string) ([]byte, error) {
-	ar := txtar.Parse([]byte(s))
+func getZip(files map[string]string) ([]byte, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no files found in zip archive")
+	}
+	names := make([]string, 0, len(files))
+	for k := range files {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+
 	var buf bytes.Buffer
 	zipw := zip.NewWriter(&buf)
-	nwritten := 0
-	for _, f := range ar.Files {
-		w, err := zipw.Create(f.Name)
+	for _, name := range names {
+		w, err := zipw.Create(name)
 		if err != nil {
 			return nil, err
 		}
-		_, err = w.Write(f.Data)
+		_, err = w.Write([]byte(files[name]))
 		if err != nil {
 			return nil, err
 		}
-		nwritten++
 	}
 	if err := zipw.Close(); err != nil {
 		return nil, err
 	}
-
-	if nwritten == 0 {
-		return nil, fmt.Errorf("no files found in txtar archive")
-	}
 	return buf.Bytes(), nil
-}
-
-func getFile(ar *txtar.Archive, name string) ([]byte, error) {
-	name = path.Clean(name)
-	for _, f := range ar.Files {
-		if path.Clean(f.Name) == name {
-			return f.Data, nil
-		}
-	}
-	return nil, fmt.Errorf("file %q not found in txtar archive", name)
 }
