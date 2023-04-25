@@ -1,9 +1,9 @@
 package oras
 
 #repoBlob: {
-	_oras: "blob"
-	repo!: string
-	desc!: #descriptor
+	_oras:   "blob"
+	repo!:   string
+	desc!:   #descriptor
 	source!: _
 }
 
@@ -16,8 +16,8 @@ package oras
 }
 
 #repoManifest: {
-	_oras: "manifest"
-	repo!: string
+	_oras:     "manifest"
+	repo!:     string
 	manifest!: #manifest & {
 		schemaVersion: _
 	}

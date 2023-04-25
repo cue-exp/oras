@@ -139,13 +139,13 @@ _#ModuleFile
 	// use of _|_ causes the source location of the errors
 	// to be lost. See https://github.com/cue-lang/cue/issues/2319.
 
-	deprecated?: 1&2
-	retract?:    1&2
-	publish?:    1&2
+	deprecated?: 1 & 2
+	retract?:    1 & 2
+	publish?:    1 & 2
 	#Dep: {
-		exclude?:    1&2
-		replace?:    1&2
-		replaceAll?: 1&2
+		exclude?:    1 & 2
+		replace?:    1 & 2
+		replaceAll?: 1 & 2
 		...
 	}
 	...

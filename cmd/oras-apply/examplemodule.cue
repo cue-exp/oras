@@ -8,8 +8,8 @@ modules: "example.com@v0.0.1": {
 	moduleFile: {
 		module: "example.com"
 		deps: {
-			"foo.com/bar/hello": v: "v0.2.3",
-			"bar.com": v: "v0.5.0",
+			"foo.com/bar/hello": v: "v0.2.3"
+			"bar.com": v:           "v0.5.0"
 		}
 	}
 	files: "top.cue": """

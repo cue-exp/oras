@@ -66,7 +66,7 @@ modules: [modNameVer=_]: {
 		"repo": path
 		digest: repoActions.manifest.desc.digest
 	}
-	deps!:  _
+	deps!:       _
 	moduleFile!: _
 	files: "cue.mod/module.cue": json.Marshal(moduleFile)
 	repoActions: {
