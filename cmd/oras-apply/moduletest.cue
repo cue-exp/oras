@@ -7,16 +7,6 @@ import (
 )
 
 #module: {
-	// path holds the module path.
-	// TODO make this include the major version too.
-	path!: string
-
-	// pathVer holds the fully qualified module path including its minor version.
-	pathVer!: string
-
-	// version holds the version of the module.
-	version!: string
-
 	// moduleFile holds the contents of cue.mod/module.cue
 	moduleFile!: _#ModuleFile
 
@@ -25,6 +15,20 @@ import (
 
 	// deps holds all the modules that this module depends on.
 	deps?: [... #module]
+
+	// All subsequent fields are filled out automatically from the modules template.
+
+	// path holds the module path.
+	// TODO make this include the major version too.
+	path!: string
+
+	// pathVer holds the fully qualified module path including its minor version.
+	// Filled out automatically.
+	pathVer!: string
+
+	// version holds the version of the module.
+	// Filled out automatically.
+	version!: string
 
 	// repoActions is filled out automatically from the above fields
 	// by the modules template.
@@ -48,6 +52,8 @@ import (
 	resolvedModules: [#modver]: {
 		digest!: #digest
 	}
+	// This should probably be a string so that it can hold
+	// comments too.
 	moduleFile!: _#ModuleFile
 }
 
@@ -55,41 +61,64 @@ import (
 
 modules: #modules
 
+// moduleConfigMediaType defines the media type of the config object
+// pointed to by the module manifest.
+//
+// TODO decide on what this should actually look like
+moduleConfigMediaType: "application/cue.module.config.v1+json"
+
+// This template derives all the task contents from the user-provided
+// fields.
 modules: [modNameVer=_]: {
-	pathVer: modNameVer
 	let _parts = strings.Split(modNameVer, "@")
 	let _path = _parts[0]
 	let _version = _parts[1]
+	let _repoName = "cue/" + _path
+
+	pathVer: modNameVer
 	path: _path
 	repoActions: tag: {
 		name:   _version
-		"repo": path
+		"repo": _repoName
 		digest: repoActions.manifest.desc.digest
 	}
 	deps!:       _
 	moduleFile!: _
+
+	// We always include the module.cue file.
 	files: "cue.mod/module.cue": json.Marshal(moduleFile)
+
 	repoActions: {
+		// Each dependency is represented as a layer.
+		// We know which layer is which because the
+		// config blob holds that metadata.
+		//
+		// The content of the module itself is always the
+		// first layer.
 		layers: [
-			// The first blob is always the "self" module content.
+			// "self" module content.
 			{
-				repo: path
+				repo: _repoName
 				desc: mediaType: "application/zip"
 				source: files
 			},
-			// Each dependency is represented as a layer.
-			// We know which layer is which because the
-			// config blob holds that metadata.
+
+			// All other dependencies.
 			for dep in deps {
-				repo: path
+				repo: _repoName
 				let depSelf = dep.repoActions.layers[0]
 				desc:   depSelf.desc
 				source: depSelf.source
 			},
 		]
+
+		// The config object holds JSON metadata that tells
+		// the reader which layer corresponds to which dependency,
+		// and also holds the contents of the module.cue file for
+		// easy access.
 		config: {
-			repo: path
-			desc: mediaType: "application/json" // TODO custom module config json type
+			repo: _repoName
+			desc: mediaType: moduleConfigMediaType
 			source: {
 				resolvedModules: {
 					for dep in deps {
@@ -101,8 +130,10 @@ modules: [modNameVer=_]: {
 				"moduleFile": moduleFile
 			}
 		}
+
+		// The manifest brings it all together.
 		manifest: {
-			repo: path
+			repo: _repoName
 			manifest: {
 				config: repoActions.config.desc
 				layers: [

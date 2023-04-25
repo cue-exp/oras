@@ -109,11 +109,11 @@ func (a *applier) getTask(v cue.Value) (flow.Runner, error) {
 	}
 	switch s {
 	case "blob":
-		return flow.RunnerFunc(mutex(a.pushBlob)), nil
+		return mutex(a.pushBlob), nil
 	case "tag":
-		return flow.RunnerFunc(mutex(a.pushTag)), nil
+		return mutex(a.pushTag), nil
 	case "manifest":
-		return flow.RunnerFunc(mutex(a.pushManifest)), nil
+		return mutex(a.pushManifest), nil
 	default:
 		return nil, fmt.Errorf("unknown _oras field value %q", s)
 	}
@@ -152,7 +152,7 @@ func (a *applier) pushBlob(t *flow.Task) error {
 	}
 	var sourceData []byte
 	switch mtype := p.Desc.MediaType; {
-	case strings.HasSuffix(mtype, "+json") || strings.HasSuffix(mtype, "/json"):
+	case isJSON(mtype):
 		sourceData = p.Source
 	case mtype == "text/plain":
 		var s string
@@ -179,7 +179,14 @@ func (a *applier) pushBlob(t *flow.Task) error {
 		return fmt.Errorf("error pushing blob to repo %q: %v", p.Repo, err)
 	}
 	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc"), cue.Str("digest")), p.Desc.Digest))
+	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc"), cue.Str("size")), p.Desc.Size))
 	return nil
+}
+
+// isJSON reports whether the given media type has JSON as an underlying encoding.
+// TODO this is a guess. There's probably a more correct way to do it.
+func isJSON(mediaType string) bool {
+	return strings.HasSuffix(mediaType, "+json") || strings.HasSuffix(mediaType, "/json")
 }
 
 type tagPush struct {
@@ -231,13 +238,12 @@ func (a *applier) pushManifest(t *flow.Task) error {
 	p.Desc.Digest = digest.FromBytes(p.Manifest)
 	p.Desc.Size = int64(len(p.Manifest))
 
-	// Ensure that the generated manifest is valid
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%v: push manifest to %s -> %s\n", t.Path(), p.Repo, p.Desc.Digest)
-
 	fmt.Fprintf(&buf, "\tsource: ")
 	json.Indent(&buf, p.Manifest, "\t", "\t")
 	logf("%s", buf.String())
+
 	if err := manifestRepo.Push(ctx, p.Desc, bytes.NewReader(p.Manifest)); err != nil {
 		return fmt.Errorf("error pushing manifest to repo %q: %v", p.Repo, err)
 	}
@@ -245,7 +251,7 @@ func (a *applier) pushManifest(t *flow.Task) error {
 	return nil
 }
 
-// getZip returns a zip archive consisting of all the files in ar
+// getZip returns a zip archive consisting of all the given files, keyed by filename.
 func getZip(files map[string]string) ([]byte, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no files found in zip archive")
@@ -263,8 +269,7 @@ func getZip(files map[string]string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, err = w.Write([]byte(files[name]))
-		if err != nil {
+		if _, err := w.Write([]byte(files[name])); err != nil {
 			return nil, err
 		}
 	}
