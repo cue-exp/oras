@@ -1,4 +1,4 @@
-package test
+package modpush
 
 modules: "example.com@v0.0.1": {
 	deps: [

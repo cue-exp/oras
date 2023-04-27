@@ -1,4 +1,4 @@
-package test
+package modpush
 
 // This schema constrains a module.cue file. This form constrains module.cue files
 // outside of the main module. For the module.cue file in a main module, the schema

@@ -1,4 +1,4 @@
-package test
+package modpush
 
 import (
 	"encoding/json"
