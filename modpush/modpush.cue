@@ -9,6 +9,19 @@ import (
 	"github.com/cue-exp/oras"
 )
 
+// moduleArtifactType defines the artifact type of a CUE module.
+// It's this that signifies at the top level that a given artifact contains
+// a CUE module.
+//
+// TODO decide on what this should actually look like
+moduleArtifactType: "application/vnd.cue.module.v1+json"
+
+// moduleFileMediaType defines the media type of a module.cue file.
+//
+// TODO decide on what this should actually look like
+// TODO should we gzip it?
+moduleFileMediaType: "application/vnd.cue.modulefile.v1"
+
 #module: {
 	// moduleFile holds the contents of cue.mod/module.cue
 	moduleFile!: _#ModuleFile
@@ -50,19 +63,6 @@ import (
 
 modules: #modules
 
-// moduleArtifactType defines the artifact type of a CUE module.
-// It's this that signifies at the top level that a given artifact contains
-// a CUE module.
-//
-// TODO decide on what this should actually look like
-moduleArtifactType: "application/vnd.cue.module.v1+json"
-
-// moduleFileMediaType defines the media type of a module.cue file.
-//
-// TODO decide on what this should actually look like
-// TODO should we gzip it?
-moduleFileMediaType: "application/vnd.cue.modulefile.v1"
-
 // This template derives all the task contents from the user-provided
 // fields.
 modules: [modNameVer=_]: {
@@ -90,6 +90,7 @@ modules: [modNameVer=_]: {
 			// The contents of this module. This must be layer 0.
 			{
 				repo: _repoName
+				// TODO should we use a custom media type for this?
 				desc: mediaType: "application/zip"
 				source: files
 			},
