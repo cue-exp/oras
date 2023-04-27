@@ -12,9 +12,25 @@ package oras
 	schemaVersion!: 2
 
 	// mediaType is reserved for use to maintain compatibility.
-	// When used, this field contains the media type of this document,
-	// which differs from the descriptor use of mediaType.
-	mediaType?: string
+	// This field should be set for backward compatibility.
+	// Its usage differs from the descriptor use of mediaType.
+	mediaType?: "application/vnd.oci.image.manifest.v1+json"
+
+	// artifactType contains the type of an artifact
+	// when the manifest is used for an artifact.
+	// This must be set when config.mediaType is set to the [scratch value].
+	//
+	// If defined, the value must comply with [RFC 6838],
+	// including the naming requirements in its section 4.2,
+	// and MAY be registered with [IANA].
+	//
+	// [scratch value]: https://github.com/opencontainers/image-spec/blob/main/manifest.md#example-of-a-scratch-config-or-layer-descriptor
+	// [RFC 6838]: https://tools.ietf.org/html/rfc6838
+	// [IANA]: https://www.iana.org/assignments/media-types/media-types.xhtml
+	artifactType?: string
+	if config.mediaType == "application/vnd.oci.scratch.v1+json" {
+		artifactType!: string
+	}
 
 	// config references a configuration object for a container by digest.
 	// Manifests concerned with portability should use the media type
@@ -60,7 +76,7 @@ package oras
 // - Descriptors should be embedded in other formats to securely reference external content.
 // - Other formats should use descriptors to securely reference external content.
 #descriptor: {
-	// metaType holds the media type of the referenced content.
+	// mediaType holds the media type of the referenced content.
 	// Values must comply with [RFC 6838],
 	// including the [naming requirements] in its section 4.2.
 	// The OCI image specification defines [several of its own MIME types]
@@ -73,6 +89,17 @@ package oras
 	// [several of its own MIME types]: https://github.com/opencontainers/image-spec/blob/v1.0.1/media-types.md
 	// [canonical JSON]: https://wiki.laptop.org/go/Canonical_JSON
 	mediaType!: string
+
+	// artifactType contains the type of an artifact when the descriptor points to an artifact.
+	// This is the value of the config descriptor "mediaType"
+	// when the descriptor references an image manifest.
+	// If defined, the value must comply with RFC 6838,
+	// including the naming requirements in its section 4.2,
+	// and may be registered with [IANA].
+	//
+	// [RFC 6838]: https://tools.ietf.org/html/rfc6838
+	// [IANA]: https://www.iana.org/assignments/media-types/media-types.xhtml
+	artifactType?: string
 
 	//  digest holds the digest of the targeted content,
 	// conforming to the requirements outlined in [Digests].
@@ -111,7 +138,7 @@ package oras
 
 	if mediaType == "application/vnd.oci.image.manifest.v1+json" {
 		// TODO https://github.com/opencontainers/image-spec/blob/v1.0.1/image-index.md#image-index-property-descriptions
-		// platform!: _
+		platform!: _
 	}
 
 	// data contains an embedded representation of the referenced content.
@@ -123,15 +150,4 @@ package oras
 	// [RFC 4648]: 	https://tools.ietf.org/html/rfc4648
 	// [Embedded Content]: https://github.com/opencontainers/image-spec/blob/main/descriptor.md#embedded-content
 	data?: string
-
-	// artifactType contains the type of an artifact when the descriptor points to an artifact.
-	// This is the value of the config descriptor "mediaType"
-	// when the descriptor references an image manifest.
-	// If defined, the value must comply with RFC 6838,
-	// including the naming requirements in its section 4.2,
-	// and may be registered with [IANA].
-	//
-	// [RFC 6838]: https://tools.ietf.org/html/rfc6838
-	// [IANA]: https://www.iana.org/assignments/media-types/media-types.xhtml
-	artifactType?: string
 }

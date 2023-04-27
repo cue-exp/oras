@@ -97,6 +97,12 @@ func (a *applier) pushBlob(t *flow.Task) error {
 			return fmt.Errorf("cannot make zip: %v", err)
 		}
 		sourceData = data
+	default:
+		var s string
+		if err := json.Unmarshal(p.Source, &s); err != nil {
+			return fmt.Errorf("invalid source %#v for media type %q (want string)", p.Source, mtype)
+		}
+		sourceData = []byte(s)
 	}
 	p.Desc.Digest = digest.FromBytes(sourceData)
 	p.Desc.Size = int64(len(sourceData))
@@ -109,25 +115,6 @@ func (a *applier) pushBlob(t *flow.Task) error {
 	}
 	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc"), cue.Str("digest")), p.Desc.Digest))
 	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc"), cue.Str("size")), p.Desc.Size))
-	return nil
-}
-
-type tagPush struct {
-	Repo string             `json:"repo,omitempty"`
-	Name string             `json:"name"`
-	Desc ocispec.Descriptor `json:"desc"`
-}
-
-func (a *applier) pushTag(t *flow.Task) error {
-	ctx := t.Context()
-	var p tagPush
-	if err := t.Value().Decode(&p); err != nil {
-		return fmt.Errorf("cannot decode manifest spec from path %v (%v): %v", t.Path(), t.Value(), err)
-	}
-	logf("%v: push tag %s:%s", t.Path(), p.Repo, p.Name)
-	if err := a.registry.Tag(ctx, p.Repo, p.Desc, p.Name); err != nil {
-		return fmt.Errorf("cannot create tag %q: %v", p.Name, err)
-	}
 	return nil
 }
 
@@ -158,6 +145,25 @@ func (a *applier) pushManifest(t *flow.Task) error {
 		return fmt.Errorf("error pushing manifest to repo %q: %v", p.Repo, err)
 	}
 	t.Fill(t.Value().FillPath(cue.MakePath(cue.Str("desc")), p.Desc))
+	return nil
+}
+
+type tagPush struct {
+	Repo string             `json:"repo,omitempty"`
+	Name string             `json:"name"`
+	Desc ocispec.Descriptor `json:"desc"`
+}
+
+func (a *applier) pushTag(t *flow.Task) error {
+	ctx := t.Context()
+	var p tagPush
+	if err := t.Value().Decode(&p); err != nil {
+		return fmt.Errorf("cannot decode manifest spec from path %v (%v): %v", t.Path(), t.Value(), err)
+	}
+	logf("%v: push tag %s:%s", t.Path(), p.Repo, p.Name)
+	if err := a.registry.Tag(ctx, p.Repo, p.Desc, p.Name); err != nil {
+		return fmt.Errorf("cannot create tag %q: %v", p.Name, err)
+	}
 	return nil
 }
 

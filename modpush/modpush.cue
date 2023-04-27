@@ -1,6 +1,9 @@
 package modpush
 
 import (
+	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"github.com/cue-exp/oras"
@@ -34,9 +37,6 @@ import (
 	// by the modules template.
 	repoActions?: {
 		layers!: [... oras.#repoBlob]
-		config!: oras.#repoBlob & {
-			source: #moduleConfig
-		}
 		manifest!: oras.#repoManifest
 		tag!:      oras.#repoTag
 	}
@@ -46,26 +46,22 @@ import (
 
 #modver: =~"^[^@]+@[^@]+$"
 
-// #moduleConfig defines the configuration blob uploaded
-// as part of a module.
-#moduleConfig: {
-	resolvedModules: [#modver]: {
-		digest!: #digest
-	}
-	// This should probably be a string so that it can hold
-	// comments too.
-	moduleFile!: _#ModuleFile
-}
-
 #digest: =~"^sha256:.*"
 
 modules: #modules
 
-// moduleConfigMediaType defines the media type of the config object
-// pointed to by the module manifest.
+// moduleArtifactType defines the artifact type of a CUE module.
+// It's this that signifies at the top level that a given artifact contains
+// a CUE module.
 //
 // TODO decide on what this should actually look like
-moduleConfigMediaType: "application/cue.module.config.v1+json"
+moduleArtifactType: "application/vnd.cue.module.v1+json"
+
+// moduleFileMediaType defines the media type of a module.cue file.
+//
+// TODO decide on what this should actually look like
+// TODO should we gzip it?
+moduleFileMediaType: "application/vnd.cue.modulefile.v1"
 
 // This template derives all the task contents from the user-provided
 // fields.
@@ -84,11 +80,6 @@ modules: [modNameVer=_]: {
 	files: "cue.mod/module.cue": json.Marshal(moduleFile)
 
 	repoActions: {
-		tag: {
-			name:   _version
-			"repo": _repoName
-			desc: repoActions.manifest.desc
-		}
 		// Each dependency is represented as a layer.
 		// We know which layer is which because the
 		// config blob holds that metadata.
@@ -96,46 +87,45 @@ modules: [modNameVer=_]: {
 		// The content of the module itself is always the
 		// first layer.
 		layers: [
-			// "self" module content.
+			// The contents of this module. This must be layer 0.
 			{
 				repo: _repoName
 				desc: mediaType: "application/zip"
 				source: files
 			},
-
-			// All other dependencies.
+			// The module file for this module, extracted for easy access.
+			{
+				repo: _repoName
+				desc: mediaType: moduleFileMediaType
+				source: json.Marshal(moduleFile)
+			},
+			// All other dependencies of this module (order doesn't matter)
 			for dep in deps {
 				repo: _repoName
-				let depSelf = dep.repoActions.layers[0]
-				desc:   depSelf.desc
-				source: depSelf.source
+
+				// Take the module files (only) from the dependency.
+				let depContent = dep.repoActions.layers[0]
+				desc:   depContent.desc
+				source: depContent.source
+
+				// Add an annotation so that the client can know which layer
+				// corresponds to which actual module version.
+				desc: annotations: "works.cue.module": dep.pathVer
 			},
 		]
 
-		// The config object holds JSON metadata that tells
-		// the reader which layer corresponds to which dependency,
-		// and also holds the contents of the module.cue file for
-		// easy access.
-		config: {
-			repo: _repoName
-			desc: mediaType: moduleConfigMediaType
-			source: {
-				resolvedModules: {
-					for dep in deps {
-						(dep.pathVer): {
-							digest: dep.repoActions.layers[0].desc.digest
-						}
-					}
-				}
-				"moduleFile": moduleFile
-			}
-		}
-
-		// The manifest brings it all together.
+		// The manifest brings together the component pieces.
 		manifest: {
 			repo: _repoName
 			manifest: {
-				config: repoActions.config.desc
+				// We don't use the configuration object, but it needs to be specified
+				// for registry compatibility reasons (and also it's here that the
+				// media type of the top level object is provided).
+				//
+				// Note: this isn't a task because we don't need an explicit push operation
+				// because _scratchConfig contains its own data directly.
+				config: _scratchConfig
+				config: mediaType: moduleArtifactType
 				layers: [
 					for layer in repoActions.layers {
 						layer.desc
@@ -143,5 +133,21 @@ modules: [modNameVer=_]: {
 				]
 			}
 		}
+		// The tag gives a name to the whole thing.
+		tag: {
+			name:   _version
+			"repo": _repoName
+			desc: repoActions.manifest.desc
+		}
 	}
+}
+
+// A "scratch" configuration descriptor.
+// https://github.com/opencontainers/image-spec/blob/main/manifest.md#example-of-a-scratch-config-or-layer-descriptor
+_scratchConfig: oras.#descriptor & {
+	let content = "{}"
+	mediaType: *"application/vnd.oci.scratch.v1+json" | string
+	size: len(content)
+	data: base64.Encode(null, content)
+	digest: "sha256:\(hex.Encode(sha256.Sum256(content)))"
 }
