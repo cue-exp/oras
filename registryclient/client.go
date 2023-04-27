@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strings"
-	"sync"
 
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -20,6 +20,12 @@ import (
 type Client struct {
 	remote *remote.Registry
 }
+
+const (
+	moduleArtifactType  = "application/vnd.cue.module.v1+json"
+	moduleFileMediaType = "application/vnd.cue.modulefile.v1"
+	moduleAnnotation    = "works.cue.module"
+)
 
 func New(registry string) (*Client, error) {
 	reg, err := remote.NewRegistry(registry)
@@ -50,16 +56,22 @@ func (c *Client) GetModule(ctx context.Context, m module.Version) (*Module, erro
 		// TODO not-found error
 		return nil, fmt.Errorf("cannot resolve %v: %v", m, err)
 	}
-	if !isManifest(modDesc.MediaType) {
-		return nil, fmt.Errorf("%v does not resolve to a manifest (media type is %q)", m, modDesc.MediaType)
-	}
 	var manifest ocispec.Manifest
 	if err := fetchJSON(ctx, repo.Manifests(), modDesc, &manifest); err != nil {
 		return nil, fmt.Errorf("cannot unmarshal manifest data: %v", err)
 	}
-	if len(manifest.Layers) < 1 {
-		return nil, fmt.Errorf("module has no layers!")
+	if !isModule(&manifest) {
+		return nil, fmt.Errorf("%v does not resolve to a manifest (media type is %q)", m, modDesc.MediaType)
 	}
+	// TODO check type of manifest too.
+	if n := len(manifest.Layers); n < 2 {
+		return nil, fmt.Errorf("not enough blobs found in module manifest; need at least 2, got %d", n)
+	}
+	if !isModuleFile(manifest.Layers[1]) {
+		return nil, fmt.Errorf("unexpected media type %q for module file blob", manifest.Layers[1].MediaType)
+	}
+	// TODO check that all other blobs are of the expected type (application/zip)
+	// and that dependencies have the expected attribute.
 	return &Module{
 		client:   c,
 		repo:     repo,
@@ -99,24 +111,10 @@ type Module struct {
 	client   *Client
 	repo     registry.Repository
 	manifest ocispec.Manifest
-
-	initOnce sync.Once
-	cfg      *moduleConfig
-	cfgErr   error
-}
-
-func (m *Module) initConfig(ctx context.Context) error {
-	m.initOnce.Do(func() {
-		m.cfgErr = fetchJSON(ctx, m.repo, m.manifest.Config, &m.cfg)
-	})
-	return m.cfgErr
 }
 
 func (m *Module) ModuleFile(ctx context.Context) ([]byte, error) {
-	if err := m.initConfig(ctx); err != nil {
-		return nil, err
-	}
-	return m.cfg.ModuleFile, nil
+	return fetchBytes(ctx, m.repo, m.manifest.Layers[1])
 }
 
 func (m *Module) GetZip(ctx context.Context) (io.ReadCloser, error) {
@@ -124,11 +122,12 @@ func (m *Module) GetZip(ctx context.Context) (io.ReadCloser, error) {
 }
 
 func (m *Module) Dependencies(ctx context.Context) (map[module.Version]Dependency, error) {
-	if err := m.initConfig(ctx); err != nil {
-		return nil, err
-	}
 	deps := make(map[module.Version]Dependency)
-	for mname, resm := range m.cfg.ResolvedModules {
+	for _, desc := range m.manifest.Layers[2:] {
+		mname, ok := desc.Annotations[moduleAnnotation]
+		if !ok {
+			return nil, fmt.Errorf("no %s annotation found for blob", moduleAnnotation)
+		}
 		mpath, mver, ok := strings.Cut(mname, "@")
 		if !ok || mver == "" || !semver.IsValid(mver) {
 			return nil, fmt.Errorf("bad module name %q found in module config", m)
@@ -136,18 +135,6 @@ func (m *Module) Dependencies(ctx context.Context) (map[module.Version]Dependenc
 		mv := module.Version{
 			Path:    mpath,
 			Version: mver,
-		}
-		var desc ocispec.Descriptor
-		found := false
-		for _, layer := range m.manifest.Layers[1:] {
-			if layer.Digest == resm.Digest {
-				desc = layer
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("no layer found for module dependency %q", m)
 		}
 		deps[mv] = Dependency{
 			client:  m.client,
@@ -176,25 +163,38 @@ func fetchJSON(ctx context.Context, from content.Fetcher, desc ocispec.Descripto
 	if !isJSON(desc.MediaType) {
 		return fmt.Errorf("expected JSON media type but %q does not look like JSON", desc.MediaType)
 	}
-	r, err := from.Fetch(ctx, desc)
+	data, err := fetchBytes(ctx, from, desc)
 	if err != nil {
-		return fmt.Errorf("cannot fetch content: %v", err)
+		return err
 	}
-	defer r.Close()
-	dec := json.NewDecoder(r)
-	if err := dec.Decode(dst); err != nil {
-		return fmt.Errorf("cannot decode content into %T: %v", dst, err)
+	if err := json.Unmarshal(data, dst); err != nil {
+		return fmt.Errorf("cannot decode %s content into %T: %v", desc.MediaType, dst, err)
 	}
 	return nil
 }
 
-func isManifest(mediaType string) bool {
-	switch mediaType {
-	case ocispec.MediaTypeImageManifest,
-		ocispec.MediaTypeArtifactManifest:
-		return true
+func fetchBytes(ctx context.Context, from content.Fetcher, desc ocispec.Descriptor) ([]byte, error) {
+	r, err := from.Fetch(ctx, desc)
+	if err != nil {
+		return nil, fmt.Errorf("cannot fetch content: %v", err)
 	}
-	return false
+	defer r.Close()
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read content: %v", err)
+	}
+	return data, err
+}
+
+func isModule(m *ocispec.Manifest) bool {
+	// TODO check m.ArtifactType too when that's defined?
+	// See https://github.com/opencontainers/image-spec/blob/main/manifest.md#image-manifest-property-descriptions
+	return m.Config.MediaType == moduleArtifactType
+}
+
+func isModuleFile(desc ocispec.Descriptor) bool {
+	return desc.ArtifactType == moduleFileMediaType ||
+		desc.MediaType == moduleFileMediaType
 }
 
 // isJSON reports whether the given media type has JSON as an underlying encoding.
