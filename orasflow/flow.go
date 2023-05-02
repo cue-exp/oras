@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	debug          = true
-	singleThreaded = true
+	debug          = false
+	singleThreaded = false
 )
 
 const orasPkg = "github.com/cue-exp/oras"
@@ -60,6 +60,8 @@ func (a *applier) getTask(v cue.Value) (flow.Runner, error) {
 		return wrapRunner(a.pushTag), nil
 	case "manifest":
 		return wrapRunner(a.pushManifest), nil
+	case "dump":
+		return wrapRunner(a.dump), nil
 	default:
 		return nil, fmt.Errorf("unknown _oras field value %q", s)
 	}
@@ -131,7 +133,14 @@ func (a *applier) pushManifest(t *flow.Task) error {
 	}
 	ctx := t.Context()
 
-	p.Desc.MediaType = ocispec.MediaTypeArtifactManifest
+	var m struct {
+		MediaType string `json:"mediaType"`
+	}
+	if err := json.Unmarshal(p.Manifest, &m); err != nil {
+		return err
+	}
+
+	p.Desc.MediaType = m.MediaType
 	p.Desc.Digest = digest.FromBytes(p.Manifest)
 	p.Desc.Size = int64(len(p.Manifest))
 
@@ -164,6 +173,18 @@ func (a *applier) pushTag(t *flow.Task) error {
 	if err := a.registry.Tag(ctx, p.Repo, p.Desc, p.Name); err != nil {
 		return fmt.Errorf("cannot create tag %q: %v", p.Name, err)
 	}
+	return nil
+}
+
+func (a *applier) dump(t *flow.Task) error {
+	ctx := t.Context()
+	var p json.RawMessage
+	if err := t.Value().Decode(&p); err != nil {
+		return fmt.Errorf("cannot decode dump from path %v (%v): %v", t.Path(), t.Value(), err)
+	}
+
+	logf("%v: dump %q", p)
+	a.registry.Dump(ctx, p)
 	return nil
 }
 

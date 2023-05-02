@@ -2,6 +2,7 @@ package orasflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -20,6 +21,7 @@ type Registry interface {
 	Push(ctx context.Context, repoName string, desc ocispec.Descriptor, content io.Reader) error
 	PushManifest(ctx context.Context, repoName string, desc ocispec.Descriptor, content io.Reader) error
 	Tag(ctx context.Context, repoName string, desc ocispec.Descriptor, reference string) error
+	Dump(ctx context.Context, stuff json.RawMessage)
 }
 
 type registryShim struct {
@@ -48,4 +50,7 @@ func (r registryShim) Tag(ctx context.Context, repoName string, desc ocispec.Des
 		return fmt.Errorf("cannot make repository from %q: %v", repoName, err)
 	}
 	return repo.Tag(ctx, desc, reference)
+}
+
+func (r registryShim) Dump(ctx context.Context, stuff json.RawMessage) {
 }

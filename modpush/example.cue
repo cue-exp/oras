@@ -1,5 +1,7 @@
 package modpush
 
+// TODO include all dependencies in each module
+
 modules: "example.com@v0.0.1": {
 	deps: [
 		modules["foo.com/bar/hello@v0.2.3"],

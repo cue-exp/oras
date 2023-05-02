@@ -23,3 +23,8 @@ package oras
 	}
 	desc?: #descriptor
 }
+
+#repoDump: {
+	_oras: "dump"
+	...
+}

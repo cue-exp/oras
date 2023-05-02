@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +29,10 @@ const (
 	singleThreaded = true
 )
 
-var nflag = flag.Bool("n", false, "print what we're doing but do not actually do anything")
+var (
+	nflag      = flag.Bool("n", false, "print what we're doing but do not actually do anything")
+	scriptFlag = flag.Bool("script", false, "generate command line script")
+)
 
 const orasPkg = "github.com/cue-exp/oras"
 
@@ -87,6 +91,9 @@ func getRegistry(ctx context.Context) (orasflow.Registry, error) {
 	reg := os.Getenv("OCI_REGISTRY")
 	if reg == "" {
 		reg = "localhost:5000" // TODO lose this default
+	}
+	if *scriptFlag {
+		return newScriptRegistry(reg), nil
 	}
 	registry, err := remote.NewRegistry(reg)
 	if err != nil {
@@ -174,6 +181,9 @@ func (r *loggingRegistry) addRefs(repoName string, desc ocispec.Descriptor, cont
 	for _, ref := range r.scanText(repoName, string(data)) {
 		r.addArc(from, ref)
 	}
+}
+
+func (r *loggingRegistry) Dump(ctx context.Context, stuff json.RawMessage) {
 }
 
 func (r *loggingRegistry) addDesc(repoName string, desc ocispec.Descriptor) {

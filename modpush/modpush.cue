@@ -1,9 +1,6 @@
 package modpush
 
 import (
-	"encoding/base64"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"github.com/cue-exp/oras"
@@ -49,6 +46,7 @@ moduleFileMediaType: "application/vnd.cue.modulefile.v1"
 	// repoActions is filled out automatically from the above fields
 	// by the modules template.
 	repoActions?: {
+		scratchConfig: oras.#repoBlob
 		layers!: [... oras.#repoBlob]
 		manifest!: oras.#repoManifest
 		tag!:      oras.#repoTag
@@ -71,8 +69,8 @@ modules: [modNameVer=_]: {
 	let _version = _parts[1]
 	let _repoName = "cue/" + _path
 
-	pathVer: modNameVer
-	path: _path
+	pathVer:     modNameVer
+	path:        _path
 	deps!:       _
 	moduleFile!: _
 
@@ -80,9 +78,16 @@ modules: [modNameVer=_]: {
 	files: "cue.mod/module.cue": json.Marshal(moduleFile)
 
 	repoActions: {
+		scratchConfig: oras.#repoBlob & {
+			repo: _repoName
+			desc: oras.scratchConfig
+			desc: mediaType: moduleArtifactType
+			source: {}
+		}
+
 		// Each dependency is represented as a layer.
-		// We know which layer is which because the
-		// config blob holds that metadata.
+		// We know which layer is which by attaching metadata to
+		// the descriptors.
 		//
 		// The content of the module itself is always the
 		// first layer.
@@ -119,14 +124,9 @@ modules: [modNameVer=_]: {
 		manifest: {
 			repo: _repoName
 			manifest: {
-				// We don't use the configuration object, but it needs to be specified
-				// for registry compatibility reasons (and also it's here that the
-				// media type of the top level object is provided).
-				//
-				// Note: this isn't a task because we don't need an explicit push operation
-				// because _scratchConfig contains its own data directly.
-				config: _scratchConfig
-				config: mediaType: moduleArtifactType
+				mediaType:    _
+				artifactType: moduleArtifactType
+				config:       scratchConfig.desc
 				layers: [
 					for layer in repoActions.layers {
 						layer.desc
@@ -138,17 +138,7 @@ modules: [modNameVer=_]: {
 		tag: {
 			name:   _version
 			"repo": _repoName
-			desc: repoActions.manifest.desc
+			desc:   repoActions.manifest.desc
 		}
 	}
-}
-
-// A "scratch" configuration descriptor.
-// https://github.com/opencontainers/image-spec/blob/main/manifest.md#example-of-a-scratch-config-or-layer-descriptor
-_scratchConfig: oras.#descriptor & {
-	let content = "{}"
-	mediaType: *"application/vnd.oci.scratch.v1+json" | string
-	size: len(content)
-	data: base64.Encode(null, content)
-	digest: "sha256:\(hex.Encode(sha256.Sum256(content)))"
 }

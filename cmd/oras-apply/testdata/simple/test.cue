@@ -4,7 +4,9 @@ import "github.com/cue-exp/oras"
 
 blobs: [_]: oras.#repoBlob
 
-manifests: [_]: oras.#repoManifest
+manifests: [_]: oras.#repoManifest & {
+	manifest: schemaVersion: _
+}
 
 tags: [name=_]: oras.#repoTag & {
 	"name": name
@@ -33,18 +35,28 @@ blobs: {
 	}
 }
 
-manifests: bar: {
-	repo: _module
-	manifest: {
-		schemaVersion: _
-		config:        blobs.foo.desc
-		layers: [
-			blobs.someContent.desc,
-		]
+manifests: {
+	bar: {
+		repo: _module
+		manifest: {
+			config: blobs.foo.desc
+			layers: [
+				blobs.someContent.desc,
+			]
+		}
+	}
+	aboutBar: {
+		repo: _module
+		manifest: {
+			config:       blobs.foo.desc
+			artifactType: "application/myannotation"
+			subject:      bar.desc
+			layers: []
+		}
 	}
 }
 
 tags: "v1.1.0": {
-	repo:   _module
+	repo: _module
 	desc: manifests.bar.desc
 }
